@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -16,9 +17,11 @@ import android.webkit.WebViewClient;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -29,10 +32,8 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private SwipeRefreshLayout swipeRefresh;
     private ProgressBar progressBar;
-    private BackendService backendService;
-    private boolean isServiceRunning = false;
+    private boolean pageLoaded = false;
 
-    // 12306 App 相关
     private static final String TICKET12306_PACKAGE = "com.MobileTicket";
     private static final String TICKET12306_APP_SCHEME = "mct12306://";
 
@@ -49,13 +50,36 @@ public class MainActivity extends AppCompatActivity {
         initWebView();
         setupSwipeRefresh();
 
-        // 启动本地后端服务
         startBackendService();
+        loadWhenReady();
+    }
 
-        // 延迟加载页面，等待服务启动
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            webView.loadUrl(LOCAL_URL);
-        }, 1500);
+    private void loadWhenReady() {
+        progressBar.setVisibility(View.VISIBLE);
+        new Thread(() -> {
+            for (int i = 0; i < 120; i++) {
+                try {
+                    URL url = new URL(LOCAL_URL);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setConnectTimeout(800);
+                    conn.setReadTimeout(800);
+                    int code = conn.getResponseCode();
+                    conn.disconnect();
+                    if (code == 200) {
+                        runOnUiThread(() -> {
+                            pageLoaded = false;
+                            webView.loadUrl(LOCAL_URL);
+                        });
+                        return;
+                    }
+                } catch (Exception ignored) {}
+                try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+            }
+            runOnUiThread(() -> {
+                progressBar.setVisibility(View.GONE);
+                Toast.makeText(this, "本地服务启动超时，请下拉刷新重试", Toast.LENGTH_LONG).show();
+            });
+        }).start();
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -93,8 +117,17 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                pageLoaded = true;
                 swipeRefresh.setRefreshing(false);
                 progressBar.setVisibility(View.GONE);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (request.isForMainFrame()) {
+                    pageLoaded = false;
+                }
             }
         });
 
@@ -113,7 +146,13 @@ public class MainActivity extends AppCompatActivity {
             android.R.color.holo_green_light,
             android.R.color.holo_orange_light
         );
-        swipeRefresh.setOnRefreshListener(() -> webView.reload());
+        swipeRefresh.setOnRefreshListener(() -> {
+            if (pageLoaded) {
+                webView.reload();
+            } else {
+                loadWhenReady();
+            }
+        });
     }
 
     private void startBackendService() {
@@ -182,9 +221,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (isServiceRunning) {
-            stopService(new Intent(this, BackendService.class));
-        }
         webView.destroy();
     }
 }
