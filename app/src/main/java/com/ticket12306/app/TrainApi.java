@@ -223,7 +223,11 @@ public class TrainApi {
             return new JSONObject().put("success", true).put("trains", trains);
 
         } catch (Exception e) {
-            return new JSONObject().put("success", false).put("message", e.getMessage());
+            try {
+                return new JSONObject().put("success", false).put("message", String.valueOf(e.getMessage()));
+            } catch (Exception e2) {
+                return new JSONObject();
+            }
         }
     }
 }
