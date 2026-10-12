@@ -28,6 +28,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .btn-success{background:linear-gradient(135deg,#56ab2f,#a8e063);color:#fff}
 .btn-danger{background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff}
 .btn-warning{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
+.btn-sm{padding:8px 16px;font-size:13px;width:auto;display:inline-block}
+.btn-row{display:flex;gap:8px}
+.btn-row .btn{flex:1}
 .status-msg{padding:10px 14px;border-radius:8px;margin-top:12px;font-size:14px;display:none}
 .status-msg.show{display:block}
 .status-msg.loading{background:#e6f7ff;border:1px solid #91d5ff;color:#0050b3}
@@ -41,9 +44,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .train-seat{font-size:13px;color:#52c41a;font-weight:500}
 .train-btn{padding:6px 14px;background:#667eea;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer}
 .log-box{background:#1a1a2e;color:#00ff88;padding:12px;border-radius:8px;font-family:'Courier New',monospace;font-size:12px;max-height:300px;overflow-y:auto;line-height:1.6;white-space:pre-wrap}
-.qrcode-box{text-align:center;padding:20px}
-.qrcode-tip{margin-top:12px;color:#666;font-size:13px}
-.account-badge{display:inline-block;padding:4px 12px;background:#e6f7ff;border-radius:20px;font-size:12px;color:#1890ff;margin:4px}
+.passenger-list{max-height:200px;overflow-y:auto}
+.passenger-item{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0}
+.passenger-item:last-child{border:none}
+.passenger-item input[type=checkbox]{width:18px;height:18px;margin-right:10px}
+.passenger-name{font-size:15px;font-weight:500}
+.passenger-id{font-size:12px;color:#999;margin-left:8px}
+.login-badge{display:inline-block;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500}
+.login-badge.yes{background:#f6ffed;color:#389e0d;border:1px solid #b7eb8f}
+.login-badge.no{background:#fff2f0;color:#cf1322;border:1px solid #ffccc7}
 </style>
 </head>
 <body>
@@ -53,6 +62,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 <p>手机本地运行 · 无需服务器</p>
 </div>
 
+<!-- 查询页 -->
 <div class="page active" id="page-home">
 <div class="card">
 <div class="card-title">📋 快速查询</div>
@@ -80,28 +90,42 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 </div>
 </div>
 
+<!-- 登录页 -->
 <div class="page" id="page-login">
 <div class="card">
-<div class="card-title">🔐 登录方式</div>
-<p style="font-size:13px;color:#666;margin-bottom:12px">已安装12306官方App？可跳转授权快速登录</p>
-<button class="btn btn-success" onclick="appLogin()">跳转12306 App授权</button>
+<div class="card-title">🔐 12306账号登录</div>
+<div style="margin-bottom:14px">
+<span id="login-badge" class="login-badge no">未登录</span>
+</div>
+<p style="font-size:13px;color:#666;margin-bottom:12px">点击下方按钮打开12306登录页面，登录成功后自动保存凭证</p>
+<button class="btn btn-primary" onclick="doLogin()">🔑 打开12306登录</button>
+<button class="btn btn-warning" onclick="doLogout()" style="margin-top:4px">退出登录</button>
 <div id="login-status" class="status-msg"></div>
 </div>
 
 <div class="card">
-<div class="card-title">✅ 已登录账号</div>
-<div id="account-list">
-<span style="color:#999;font-size:13px">暂无已登录账号</span>
+<div class="card-title">📱 App快捷登录</div>
+<p style="font-size:13px;color:#666;margin-bottom:12px">已安装12306官方App？可跳转授权</p>
+<button class="btn btn-success" onclick="bridge.open12306App()">跳转12306 App</button>
 </div>
+
+<div class="card">
+<div class="card-title">👥 我的乘车人</div>
+<button class="btn btn-sm btn-primary" onclick="loadPassengers()" style="margin-bottom:10px">刷新乘车人列表</button>
+<div id="passenger-list" class="passenger-list">
+<div style="text-align:center;color:#999;padding:16px">请先登录后刷新</div>
+</div>
+<div id="passenger-status" class="status-msg"></div>
 </div>
 </div>
 
+<!-- 抢票页 -->
 <div class="page" id="page-grab">
 <div class="card">
 <div class="card-title">🎯 抢票配置</div>
 <div class="input-group">
 <label>车次号</label>
-<input type="text" id="grab-train" placeholder="如: G123 或 G1/G3">
+<input type="text" id="grab-train" placeholder="如: G123">
 </div>
 <div class="input-group">
 <label>出发地</label>
@@ -118,8 +142,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 <div class="input-group">
 <label>席别</label>
 <select id="grab-seat">
-<option value="M">一等座</option>
 <option value="O" selected>二等座</option>
+<option value="M">一等座</option>
 <option value="A">商务座</option>
 <option value="9">硬卧</option>
 <option value="P">软卧</option>
@@ -127,8 +151,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 <option value="1">硬座</option>
 </select>
 </div>
+
+<div class="input-group">
+<label>选择乘车人</label>
+<div id="grab-passengers" style="border:1px solid #d9d9d9;border-radius:8px;padding:8px;max-height:150px;overflow-y:auto;background:#fafafa">
+<div style="color:#999;font-size:13px;text-align:center;padding:8px">请先在登录页刷新乘车人</div>
+</div>
+</div>
+
+<div class="btn-row">
 <button class="btn btn-danger" onclick="startGrab()">🚀 开始抢票</button>
-<button class="btn btn-warning" onclick="stopGrab()" style="margin-top:4px">⏹ 停止抢票</button>
+<button class="btn btn-warning" onclick="stopGrab()">⏹ 停止</button>
+</div>
 <div id="grab-status" class="status-msg"></div>
 </div>
 
@@ -142,7 +176,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 <div class="nav-item active" onclick="switchPage('home',this)">
 <span class="icon">🔍</span>查询
 </div>
-<div class="nav-item" onclick="switchPage('login',this)">
+<div class="nav-item" onclick="switchPage('login',this);checkLogin()">
 <span class="icon">👤</span>登录
 </div>
 <div class="nav-item" onclick="switchPage('grab',this)">
@@ -152,6 +186,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 
 <script>
 var bridge = window.AndroidBridge;
+var passengersData = [];
 
 function switchPage(id,el){
 document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
@@ -166,13 +201,18 @@ el.className='status-msg show '+type;
 el.textContent=msg;
 }
 
+function hideStatus(id){
+document.getElementById(id).className='status-msg';
+}
+
+// 查询
 function queryTickets(){
 showStatus('query-status','loading','查询中...');
 try{
-var from=document.getElementById('from').value;
-var to=document.getElementById('to').value;
-var date=document.getElementById('date').value;
-var r=JSON.parse(bridge.queryTickets(from,to,date));
+var r=JSON.parse(bridge.queryTickets(
+document.getElementById('from').value,
+document.getElementById('to').value,
+document.getElementById('date').value));
 if(r.success){
 showStatus('query-status','success','找到'+(r.trains?r.trains.length:0)+'个车次');
 renderTrains(r.trains||[]);
@@ -203,11 +243,89 @@ document.getElementById('grab-to').value=to;
 document.querySelector('.nav-item:nth-child(3)').click();
 }
 
-function appLogin(){
-try{bridge.open12306App();}catch(e){showStatus('login-status','error','跳转失败: '+e.message)}
+// 登录
+function checkLogin(){
+try{
+var r=JSON.parse(bridge.checkLogin());
+var badge=document.getElementById('login-badge');
+if(r.loggedIn){
+badge.className='login-badge yes';
+badge.textContent='✅ 已登录';
+}else{
+badge.className='login-badge no';
+badge.textContent='❌ 未登录';
+}
+}catch(e){}
 }
 
+function doLogin(){
+showStatus('login-status','loading','正在打开12306登录页...');
+try{
+bridge.openLoginPage();
+setTimeout(function(){
+showStatus('login-status','success','请在登录页面完成登录，登录后返回本页刷新');
+checkLogin();
+},2000);
+}catch(e){showStatus('login-status','error',e.message)}
+}
+
+function doLogout(){
+try{bridge.logout();}catch(e){}
+checkLogin();
+showStatus('login-status','success','已退出登录');
+document.getElementById('passenger-list').innerHTML='<div style="text-align:center;color:#999;padding:16px">请先登录后刷新</div>';
+}
+
+// 乘车人
+function loadPassengers(){
+showStatus('passenger-status','loading','加载乘车人...');
+try{
+var r=JSON.parse(bridge.getPassengers());
+if(r.success&&r.passengers&&r.passengers.length){
+passengersData=r.passengers;
+renderPassengers(r.passengers);
+showStatus('passenger-status','success','共'+r.passengers.length+'位乘车人');
+renderGrabPassengers(r.passengers);
+}else{
+showStatus('passenger-status','error',r.message||'获取失败，请先登录');
+}
+}catch(e){showStatus('passenger-status','error',e.message)}
+}
+
+function renderPassengers(list){
+var el=document.getElementById('passenger-list');
+el.innerHTML=list.map(function(p){
+return '<div class="passenger-item">'+
+'<span class="passenger-name">'+p.name+'</span>'+
+'<span class="passenger-id">'+p.idNo.substring(0,6)+'****'+p.idNo.substring(p.idNo.length-4)+'</span>'+
+'</div>';
+}).join('');
+}
+
+function renderGrabPassengers(list){
+var el=document.getElementById('grab-passengers');
+el.innerHTML=list.map(function(p,i){
+return '<div class="passenger-item">'+
+'<input type="checkbox" id="pcheck'+i+'" value="'+i+'" checked>'+
+'<label for="pcheck'+i+'" class="passenger-name">'+p.name+'</label>'+
+'<span class="passenger-id">'+p.idNo.substring(0,6)+'****'+p.idNo.substring(p.idNo.length-4)+'</span>'+
+'</div>';
+}).join('');
+}
+
+// 抢票
 function startGrab(){
+var selected=[];
+document.querySelectorAll('#grab-passengers input[type=checkbox]:checked').forEach(function(cb){
+var idx=parseInt(cb.value);
+if(passengersData[idx])selected.push(passengersData[idx]);
+});
+
+if(!selected.length){
+showStatus('grab-status','error','请至少选择一位乘车人');
+return;
+}
+
 showStatus('grab-status','loading','抢票启动中...');
 try{
 var r=JSON.parse(bridge.startGrab(
@@ -215,7 +333,8 @@ document.getElementById('grab-train').value,
 document.getElementById('grab-from').value,
 document.getElementById('grab-to').value,
 document.getElementById('grab-date').value,
-document.getElementById('grab-seat').value
+document.getElementById('grab-seat').value,
+JSON.stringify(selected)
 ));
 showStatus('grab-status',r.success?'success':'error',r.message||'');
 if(r.success)setTimeout(pollGrabLog,500);
@@ -237,13 +356,15 @@ box.scrollTop=box.scrollHeight;
 }
 if(r.running)setTimeout(pollGrabLog,1000);
 else if(r.success){
-showStatus('grab-status','success','🎉 抢票任务结束！');
+showStatus('grab-status','success','🎉 抢票成功！请尽快在12306 App中支付！');
 }
 }catch(e){setTimeout(pollGrabLog,3000)}
 }
 
+// 初始化
 document.getElementById('date').valueAsDate=new Date();
 document.getElementById('grab-date').valueAsDate=new Date();
+checkLogin();
 </script>
 </body>
 </html>
