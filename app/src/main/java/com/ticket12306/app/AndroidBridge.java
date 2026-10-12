@@ -24,7 +24,6 @@ public class AndroidBridge {
     private volatile boolean grabRunning = false;
     private final List<String> grabLogs = new ArrayList<>();
     private boolean grabSuccess = false;
-    private String grabError = "";
 
     public AndroidBridge(Context context) {
         this.context = context.getApplicationContext();
@@ -51,20 +50,21 @@ public class AndroidBridge {
     }
 
     @JavascriptInterface
-    public void openLoginPage() {
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (context instanceof MainActivity) {
-                    ((MainActivity) context).showLoginWebView();
-                }
-            }
-        });
+    public String getQRCode() {
+        try {
+            return TrainApi.getQRCode(context).toString();
+        } catch (Exception e) {
+            return "{\"success\":false,\"message\":\"" + escape(e.getMessage()) + "\"}";
+        }
     }
 
     @JavascriptInterface
-    public void logout() {
-        TrainApi.clearCookies(context);
+    public String checkQRStatus() {
+        try {
+            return TrainApi.checkQRStatus(context).toString();
+        } catch (Exception e) {
+            return "{\"success\":false,\"message\":\"" + escape(e.getMessage()) + "\"}";
+        }
     }
 
     @JavascriptInterface
@@ -74,6 +74,11 @@ public class AndroidBridge {
         } catch (Exception e) {
             return "{\"success\":false,\"message\":\"" + escape(e.getMessage()) + "\"}";
         }
+    }
+
+    @JavascriptInterface
+    public void logout() {
+        TrainApi.clearCookies(context);
     }
 
     @JavascriptInterface
@@ -88,7 +93,6 @@ public class AndroidBridge {
 
         grabRunning = true;
         grabSuccess = false;
-        grabError = "";
         grabLogs.clear();
         addLog("抢票启动: " + trainCode + " " + from + "→" + to + " " + date);
 
