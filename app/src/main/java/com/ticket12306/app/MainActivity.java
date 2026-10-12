@@ -56,7 +56,6 @@ public class MainActivity extends AppCompatActivity {
                     WebSettings s = loginWebView.getSettings();
                     s.setJavaScriptEnabled(true);
                     s.setDomStorageEnabled(true);
-                    s.setCookieEnabled(true);
                     s.setUseWideViewPort(true);
                     s.setLoadWithOverviewMode(true);
                     s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
