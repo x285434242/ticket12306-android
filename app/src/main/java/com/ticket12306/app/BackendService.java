@@ -30,7 +30,21 @@ public class BackendService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(NOTIFICATION_ID, buildNotification("服务启动中..."));
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, buildNotification("服务启动中..."),
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            } else {
+                startForeground(NOTIFICATION_ID, buildNotification("服务启动中..."));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "startForeground failed", e);
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification("服务启动中..."));
+            } catch (Exception e2) {
+                Log.e(TAG, "startForeground fallback failed", e2);
+            }
+        }
 
         new Thread(() -> {
             try {
@@ -41,11 +55,10 @@ public class BackendService extends Service {
                 Python py = Python.getInstance();
                 PyObject mainModule = py.getModule("main");
 
-                // 启动服务器（阻塞调用）
-                PyObject result = mainModule.callAttr("start_server", PORT);
-
-                Log.d(TAG, "Server started on port " + PORT);
                 updateNotification("12306抢票服务运行中");
+
+                // 启动服务器（阻塞调用，永久阻塞在此线程）
+                mainModule.callAttr("start_server", PORT);
 
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start Python server", e);
