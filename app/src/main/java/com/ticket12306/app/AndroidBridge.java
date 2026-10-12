@@ -92,12 +92,13 @@ public class AndroidBridge {
         grabLogs.clear();
         addLog("抢票启动: " + trainCode + " " + from + "→" + to + " " + date);
 
-        final JSONArray passengers;
+        JSONArray passengersArr;
         try {
-            passengers = new JSONArray(passengersJson);
+            passengersArr = new JSONArray(passengersJson);
         } catch (Exception e) {
-            passengers = new JSONArray();
+            passengersArr = new JSONArray();
         }
+        final JSONArray passengers = passengersArr;
 
         final String fTrain = trainCode, fFrom = from, fTo = to, fDate = date, fSeat = seat;
 
