@@ -11,9 +11,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 
-# 模块路径
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '12306-train-assistant'))
-
 PORT = 8765
 LOGS = []
 GRAB_STATUS = {"running": False, "logs": []}
