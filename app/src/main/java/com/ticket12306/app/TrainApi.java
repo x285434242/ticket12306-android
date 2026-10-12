@@ -2,17 +2,20 @@ package com.ticket12306.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.webkit.CookieManager;
+import android.util.Base64;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -79,13 +82,10 @@ public class TrainApi {
         return "";
     }
 
-    private static String getSavedCookies(Context ctx) {
-        try {
-            SharedPreferences sp = ctx.getSharedPreferences("login", Context.MODE_PRIVATE);
-            return sp.getString("cookies", "");
-        } catch (Exception e) {
-            return "";
-        }
+    // ========== Cookie 管理 ==========
+    public static String getSavedCookies(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences("login", Context.MODE_PRIVATE);
+        return sp.getString("cookies", "");
     }
 
     public static void saveCookies(Context ctx, String cookies) {
@@ -95,21 +95,22 @@ public class TrainApi {
 
     public static boolean isLoggedIn(Context ctx) {
         String c = getSavedCookies(ctx);
-        return c.contains("RAIL_EXPIRATION") || c.contains("JSESSIONID") || c.contains("_jc_save_fromStation");
+        return c.contains("RAIL_EXPIRATION") || c.contains("JSESSIONID");
     }
 
     public static void clearCookies(Context ctx) {
         ctx.getSharedPreferences("login", Context.MODE_PRIVATE).edit().clear().apply();
     }
 
-    private static JSONObject httpGet(Context ctx, String url) throws Exception {
+    // ========== HTTP 基础 ==========
+    private static JSONObject httpGetRaw(Context ctx, String url, String referer) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(15000);
         conn.setReadTimeout(15000);
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         conn.setRequestProperty("Accept", "application/json, text/javascript, */*; q=0.01");
-        conn.setRequestProperty("Referer", "https://kyfw.12306.cn/otn/leftTicket/init");
+        if (referer != null) conn.setRequestProperty("Referer", referer);
         conn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
         String cookies = getSavedCookies(ctx);
         if (!cookies.isEmpty()) conn.setRequestProperty("Cookie", cookies);
@@ -117,16 +118,31 @@ public class TrainApi {
         int code = conn.getResponseCode();
         if (code != 200) throw new RuntimeException("HTTP " + code);
 
+        // 同时收集响应头中的 Set-Cookie
+        StringBuilder setCookies = new StringBuilder();
+        Map<String, java.util.List<String>> headers = conn.getHeaderFields();
+        java.util.List<String> cookieHeaders = headers.get("Set-Cookie");
+        if (cookieHeaders != null) {
+            for (String sc : cookieHeaders) {
+                String val = sc.split(";")[0];
+                if (setCookies.length() > 0) setCookies.append("; ");
+                setCookies.append(val);
+            }
+        }
+
         BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
         StringBuilder sb = new StringBuilder();
         String line;
         while ((line = reader.readLine()) != null) sb.append(line);
         reader.close();
         conn.disconnect();
-        return new JSONObject(sb.toString());
+
+        JSONObject result = new JSONObject(sb.toString());
+        result.put("_setCookies", setCookies.toString());
+        return result;
     }
 
-    private static JSONObject httpPost(Context ctx, String url, String body) throws Exception {
+    private static JSONObject httpPostRaw(Context ctx, String url, String body, String referer) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(15000);
@@ -135,7 +151,7 @@ public class TrainApi {
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         conn.setRequestProperty("Accept", "application/json, text/javascript, */*; q=0.01");
         conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-        conn.setRequestProperty("Referer", "https://kyfw.12306.cn/otn/leftTicket/init");
+        if (referer != null) conn.setRequestProperty("Referer", referer);
         conn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
         String cookies = getSavedCookies(ctx);
         if (!cookies.isEmpty()) conn.setRequestProperty("Cookie", cookies);
@@ -148,14 +164,161 @@ public class TrainApi {
         int code = conn.getResponseCode();
         if (code != 200) throw new RuntimeException("HTTP " + code);
 
+        StringBuilder setCookies = new StringBuilder();
+        Map<String, java.util.List<String>> headers = conn.getHeaderFields();
+        java.util.List<String> cookieHeaders = headers.get("Set-Cookie");
+        if (cookieHeaders != null) {
+            for (String sc : cookieHeaders) {
+                String val = sc.split(";")[0];
+                if (setCookies.length() > 0) setCookies.append("; ");
+                setCookies.append(val);
+            }
+        }
+
         BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
         StringBuilder sb = new StringBuilder();
         String line;
         while ((line = reader.readLine()) != null) sb.append(line);
         reader.close();
         conn.disconnect();
-        return new JSONObject(sb.toString());
+
+        JSONObject result = new JSONObject(sb.toString());
+        result.put("_setCookies", setCookies.toString());
+        return result;
     }
+
+    // ========== 二维码登录 ==========
+
+    /**
+     * 获取二维码登录图片（base64）
+     * 流程：
+     * 1. GET qrLoginInit 获取 eid 和二维码 URL
+     * 2. 下载二维码图片转 base64
+     */
+    public static JSONObject getQRCode(Context ctx) {
+        try {
+            // 1. 初始化二维码登录
+            JSONObject initResp = httpGetRaw(ctx,
+                "https://kyfw.12306.cn/otn/qrLoginInit",
+                "https://kyfw.12306.cn/otn/view/login.html");
+
+            // 保存 init 返回的 cookie
+            String newCookies = initResp.optString("_setCookies", "");
+            if (!newCookies.isEmpty()) {
+                String existing = getSavedCookies(ctx);
+                saveCookies(ctx, existing.isEmpty() ? newCookies : existing + "; " + newCookies);
+            }
+
+            JSONObject data = initResp.optJSONObject("data");
+            if (data == null) {
+                // 尝试另一种响应格式
+                String resultImg = initResp.optString("result_image", "");
+                if (!resultImg.isEmpty()) {
+                    return downloadQRAsBase64(ctx, resultImg);
+                }
+                return err("获取二维码初始化失败");
+            }
+
+            String resultImage = data.optString("result_image", "");
+            if (resultImage.isEmpty()) {
+                resultImage = initResp.optString("result_image", "");
+            }
+            if (resultImage.isEmpty()) {
+                return err("未获取到二维码图片地址");
+            }
+
+            // 2. 下载二维码图片
+            return downloadQRAsBase64(ctx, resultImage);
+
+        } catch (Exception e) {
+            return err("获取二维码失败: " + e.getMessage());
+        }
+    }
+
+    private static JSONObject downloadQRAsBase64(Context ctx, String imageUrl) {
+        try {
+            // imageUrl 可能是完整 URL 或相对路径
+            String fullUrl = imageUrl.startsWith("http") ? imageUrl :
+                "https://kyfw.12306.cn" + (imageUrl.startsWith("/") ? "" : "/") + imageUrl;
+
+            HttpURLConnection conn = (HttpURLConnection) new URL(fullUrl).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+            conn.setRequestProperty("Referer", "https://kyfw.12306.cn/otn/view/login.html");
+            String cookies = getSavedCookies(ctx);
+            if (!cookies.isEmpty()) conn.setRequestProperty("Cookie", cookies);
+
+            InputStream is = conn.getInputStream();
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int len;
+            while ((len = is.read(buf)) != -1) baos.write(buf, 0, len);
+            is.close();
+            conn.disconnect();
+
+            byte[] imgBytes = baos.toByteArray();
+            if (imgBytes.length < 100) return err("二维码图片下载失败");
+
+            String base64 = Base64.encodeToString(imgBytes, Base64.NO_WRAP);
+            JSONObject result = new JSONObject();
+            result.put("success", true);
+            result.put("qr", "data:image/png;base64," + base64);
+            result.put("imageUrl", fullUrl);
+            return result;
+        } catch (Exception e) {
+            return err("下载二维码失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 轮询二维码扫码状态
+     */
+    public static JSONObject checkQRStatus(Context ctx) {
+        try {
+            JSONObject resp = httpGetRaw(ctx,
+                "https://kyfw.12306.cn/otn/qrLoginCheck",
+                "https://kyfw.12306.cn/otn/view/login.html");
+
+            // 保存返回的 cookie（登录成功时会有新 cookie）
+            String newCookies = resp.optString("_setCookies", "");
+            if (!newCookies.isEmpty()) {
+                String existing = getSavedCookies(ctx);
+                saveCookies(ctx, existing.isEmpty() ? newCookies : existing + "; " + newCookies);
+            }
+
+            int resultCode = resp.optInt("result_code", -1);
+            // result_code: 0=未扫码, 1=已扫码待确认, 2=登录成功, 3=过期
+            boolean loggedIn = (resultCode == 2);
+            boolean expired = (resultCode == 3);
+            boolean scanned = (resultCode == 1);
+
+            JSONObject result = new JSONObject();
+            result.put("success", true);
+            result.put("loggedIn", loggedIn);
+            result.put("scanned", scanned);
+            result.put("expired", expired);
+            result.put("resultCode", resultCode);
+
+            if (loggedIn) {
+                // 验证登录状态
+                result.put("message", "登录成功！");
+            } else if (expired) {
+                result.put("message", "二维码已过期，请刷新");
+            } else if (scanned) {
+                result.put("message", "已扫码，请在手机上确认");
+            } else {
+                result.put("message", "等待扫码...");
+            }
+
+            return result;
+        } catch (Exception e) {
+            return err("检查扫码状态失败: " + e.getMessage());
+        }
+    }
+
+    // ========== 查询车票 ==========
 
     public static JSONObject queryLeftTicket(Context ctx, String fromName, String toName, String date) {
         try {
@@ -170,7 +333,7 @@ public class TrainApi {
                     "&leftTicketDTO.to_station=" + toCode +
                     "&purpose_codes=ADULT";
 
-            JSONObject resp = httpGet(ctx, url);
+            JSONObject resp = httpGetRaw(ctx, url, "https://kyfw.12306.cn/otn/leftTicket/init");
             JSONObject data = resp.optJSONObject("data");
             if (data == null) return err("接口返回异常");
 
@@ -216,11 +379,15 @@ public class TrainApi {
         }
     }
 
+    // ========== 乘车人 ==========
+
     public static JSONObject getPassengers(Context ctx) {
         try {
-            JSONObject resp = httpPost(ctx,
+            JSONObject resp = httpPostRaw(ctx,
                 "https://kyfw.12306.cn/otn/confirm passengers/getPassengerDTOs",
-                "REPEAT_SUBMIT_TOKEN=");
+                "REPEAT_SUBMIT_TOKEN=",
+                "https://kyfw.12306.cn/otn/view/initMyInfo.html");
+
             JSONObject data = resp.optJSONObject("data");
             if (data == null) return err("获取乘车人失败，请先登录");
             JSONArray normals = data.optJSONArray("normal_passengers");
@@ -245,6 +412,8 @@ public class TrainApi {
         }
     }
 
+    // ========== 下单 ==========
+
     public static JSONObject submitOrder(Context ctx, String trainCode, String date,
                                           String seatType, String fromName, String toName,
                                           JSONArray passengers) {
@@ -252,23 +421,17 @@ public class TrainApi {
             String fromCode = getStationCode(fromName);
             String toCode = getStationCode(toName);
 
-            // 1. 获取提交订单所需的 token
-            JSONObject initResp = httpGet(ctx,
-                "https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc");
-            // 从 init 页面提取全局 token
-            String globalRepeatSubmitToken = "";
-            // 尝试从 getPassengerDTOs 获取
-            JSONObject passResp = httpPost(ctx,
+            // 1. 获取 globalRepeatSubmitToken
+            JSONObject passResp = httpPostRaw(ctx,
                 "https://kyfw.12306.cn/otn/confirm passengers/getPassengerDTOs",
-                "REPEAT_SUBMIT_TOKEN=");
+                "REPEAT_SUBMIT_TOKEN=",
+                "https://kyfw.12306.cn/otn/view/initMyInfo.html");
             JSONObject pData = passResp.optJSONObject("data");
-            if (pData != null) {
-                globalRepeatSubmitToken = pData.optString("token", "");
-            }
+            String token = pData != null ? pData.optString("token", "") : "";
 
             // 2. 提交订单
             StringBuilder sb = new StringBuilder();
-            sb.append("repeatSubmitToken=").append(URLEncoder.encode(globalRepeatSubmitToken, "UTF-8"));
+            sb.append("repeatSubmitToken=").append(URLEncoder.encode(token, "UTF-8"));
             sb.append("&train_date=").append(URLEncoder.encode(date, "UTF-8"));
             sb.append("&back_train_date=").append(URLEncoder.encode(date, "UTF-8"));
             sb.append("&tour_flag=0");
@@ -277,7 +440,6 @@ public class TrainApi {
             sb.append("&query_to_station_name=").append(URLEncoder.encode(toName, "UTF-8"));
             sb.append("&undefined=");
 
-            // 设置乘客
             StringBuilder passengerTicketStr = new StringBuilder();
             StringBuilder oldPassengerStr = new StringBuilder();
             for (int i = 0; i < passengers.length(); i++) {
@@ -288,23 +450,24 @@ public class TrainApi {
                 passengerTicketStr.append(seatType).append(",0,1,").append(pid).append(",").append(pname).append(",N,1,");
                 oldPassengerStr.append(pname).append(",1,").append(pid).append(",1_");
             }
-
             sb.append("&passengerTicketStr=").append(URLEncoder.encode(passengerTicketStr.toString(), "UTF-8"));
             sb.append("&oldPassengerStr=").append(URLEncoder.encode(oldPassengerStr.toString(), "UTF-8"));
 
-            JSONObject orderResp = httpPost(ctx,
+            JSONObject orderResp = httpPostRaw(ctx,
                 "https://kyfw.12306.cn/otn/leftTicket/submitOrderRequest",
-                sb.toString());
+                sb.toString(),
+                "https://kyfw.12306.cn/otn/leftTicket/init");
 
             JSONObject result = new JSONObject();
             result.put("success", orderResp.optBoolean("status", false));
-            result.put("message", orderResp.optJSONObject("messages") != null ?
-                orderResp.optJSONObject("messages").toString() : "订单提交结果未知");
+            result.put("message", orderResp.optBoolean("status", false) ? "订单已提交，请尽快支付" : "下单失败");
             return result;
         } catch (Exception e) {
             return err(e.getMessage());
         }
     }
+
+    // ========== 工具方法 ==========
 
     private static JSONObject ok(JSONArray trains) {
         try {
