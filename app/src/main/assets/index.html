@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>12306抢票助手</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:#f0f2f5;padding-bottom:80px}
+.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:20px 16px;text-align:center}
+.header h1{font-size:20px;font-weight:600}
+.header p{font-size:12px;opacity:.85;margin-top:4px}
+.nav{display:flex;background:#fff;position:fixed;bottom:0;left:0;right:0;border-top:1px solid #e8e8e8;z-index:99}
+.nav-item{flex:1;padding:12px 0;text-align:center;font-size:12px;color:#666;cursor:pointer}
+.nav-item.active{color:#667eea}
+.nav-item .icon{font-size:22px;display:block;margin-bottom:2px}
+.page{display:none;padding:12px}
+.page.active{display:block}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.card-title{font-size:15px;font-weight:600;color:#333;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.input-group{margin-bottom:14px}
+.input-group label{display:block;font-size:13px;color:#666;margin-bottom:6px}
+.input-group input,.input-group select{width:100%;padding:10px 12px;border:1px solid #d9d9d9;border-radius:8px;font-size:15px;background:#fafafa}
+.input-group input:focus,.input-group select:focus{outline:none;border-color:#667eea;background:#fff}
+.btn{width:100%;padding:12px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;transition:opacity .2s}
+.btn:active{opacity:.8}
+.btn-primary{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
+.btn-success{background:linear-gradient(135deg,#56ab2f,#a8e063);color:#fff}
+.btn-danger{background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff}
+.btn-warning{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
+.status-msg{padding:10px 14px;border-radius:8px;margin-top:12px;font-size:14px;display:none}
+.status-msg.show{display:block}
+.status-msg.loading{background:#e6f7ff;border:1px solid #91d5ff;color:#0050b3}
+.status-msg.success{background:#f6ffed;border:1px solid #b7eb8f;color:#389e0d}
+.status-msg.error{background:#fff2f0;border:1px solid #ffccc7;color:#cf1322}
+.train-list{max-height:400px;overflow-y:auto}
+.train-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0}
+.train-item:last-child{border:none}
+.train-code{font-size:16px;font-weight:700;color:#667eea}
+.train-route{font-size:12px;color:#999}
+.train-seat{font-size:13px;color:#52c41a;font-weight:500}
+.train-btn{padding:6px 14px;background:#667eea;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer}
+.log-box{background:#1a1a2e;color:#00ff88;padding:12px;border-radius:8px;font-family:'Courier New',monospace;font-size:12px;max-height:300px;overflow-y:auto;line-height:1.6;white-space:pre-wrap}
+.qrcode-box{text-align:center;padding:20px}
+.qrcode-tip{margin-top:12px;color:#666;font-size:13px}
+.account-badge{display:inline-block;padding:4px 12px;background:#e6f7ff;border-radius:20px;font-size:12px;color:#1890ff;margin:4px}
+</style>
+</head>
+<body>
+
+<div class="header">
+<h1>🚄 12306抢票助手</h1>
+<p>手机本地运行 · 无需服务器</p>
+</div>
+
+<div class="page active" id="page-home">
+<div class="card">
+<div class="card-title">📋 快速查询</div>
+<div class="input-group">
+<label>出发地</label>
+<input type="text" id="from" placeholder="输入城市名" value="北京">
+</div>
+<div class="input-group">
+<label>目的地</label>
+<input type="text" id="to" placeholder="输入城市名" value="上海">
+</div>
+<div class="input-group">
+<label>出发日期</label>
+<input type="date" id="date">
+</div>
+<button class="btn btn-primary" onclick="queryTickets()">🔍 查询车票</button>
+<div id="query-status" class="status-msg"></div>
+</div>
+
+<div class="card">
+<div class="card-title">🚄 车次列表</div>
+<div id="train-list" class="train-list">
+<div style="text-align:center;color:#999;padding:20px">请先查询车票</div>
+</div>
+</div>
+</div>
+
+<div class="page" id="page-login">
+<div class="card">
+<div class="card-title">🔐 登录方式</div>
+<p style="font-size:13px;color:#666;margin-bottom:12px">已安装12306官方App？可跳转授权快速登录</p>
+<button class="btn btn-success" onclick="appLogin()">跳转12306 App授权</button>
+<div id="login-status" class="status-msg"></div>
+</div>
+
+<div class="card">
+<div class="card-title">✅ 已登录账号</div>
+<div id="account-list">
+<span style="color:#999;font-size:13px">暂无已登录账号</span>
+</div>
+</div>
+</div>
+
+<div class="page" id="page-grab">
+<div class="card">
+<div class="card-title">🎯 抢票配置</div>
+<div class="input-group">
+<label>车次号</label>
+<input type="text" id="grab-train" placeholder="如: G123 或 G1/G3">
+</div>
+<div class="input-group">
+<label>出发地</label>
+<input type="text" id="grab-from" placeholder="如: 北京">
+</div>
+<div class="input-group">
+<label>目的地</label>
+<input type="text" id="grab-to" placeholder="如: 上海">
+</div>
+<div class="input-group">
+<label>出发日期</label>
+<input type="date" id="grab-date">
+</div>
+<div class="input-group">
+<label>席别</label>
+<select id="grab-seat">
+<option value="M">一等座</option>
+<option value="O" selected>二等座</option>
+<option value="A">商务座</option>
+<option value="9">硬卧</option>
+<option value="P">软卧</option>
+<option value="F">动卧</option>
+<option value="1">硬座</option>
+</select>
+</div>
+<button class="btn btn-danger" onclick="startGrab()">🚀 开始抢票</button>
+<button class="btn btn-warning" onclick="stopGrab()" style="margin-top:4px">⏹ 停止抢票</button>
+<div id="grab-status" class="status-msg"></div>
+</div>
+
+<div class="card">
+<div class="card-title">📊 实时日志</div>
+<div id="grab-log" class="log-box">等待开始...</div>
+</div>
+</div>
+
+<div class="nav">
+<div class="nav-item active" onclick="switchPage('home',this)">
+<span class="icon">🔍</span>查询
+</div>
+<div class="nav-item" onclick="switchPage('login',this)">
+<span class="icon">👤</span>登录
+</div>
+<div class="nav-item" onclick="switchPage('grab',this)">
+<span class="icon">🎯</span>抢票
+</div>
+</div>
+
+<script>
+var bridge = window.AndroidBridge;
+
+function switchPage(id,el){
+document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});
+document.getElementById('page-'+id).classList.add('active');
+if(el)el.classList.add('active');
+}
+
+function showStatus(id,type,msg){
+var el=document.getElementById(id);
+el.className='status-msg show '+type;
+el.textContent=msg;
+}
+
+function queryTickets(){
+showStatus('query-status','loading','查询中...');
+try{
+var from=document.getElementById('from').value;
+var to=document.getElementById('to').value;
+var date=document.getElementById('date').value;
+var r=JSON.parse(bridge.queryTickets(from,to,date));
+if(r.success){
+showStatus('query-status','success','找到'+(r.trains?r.trains.length:0)+'个车次');
+renderTrains(r.trains||[]);
+}else{
+showStatus('query-status','error',r.message||'查询失败');
+}
+}catch(e){
+showStatus('query-status','error','查询失败: '+e.message);
+}
+}
+
+function renderTrains(trains){
+var el=document.getElementById('train-list');
+if(!trains.length){el.innerHTML='<div style="text-align:center;color:#999;padding:20px">无车次</div>';return}
+el.innerHTML=trains.map(function(t){
+return '<div class="train-item">'+
+'<div><div class="train-code">'+t.code+'</div>'+
+'<div class="train-route">'+t.from+' → '+t.to+' | '+t.depart+' - '+t.arrive+'</div></div>'+
+'<div style="text-align:right"><div class="train-seat">'+(t.seatText||'')+'</div>'+
+'<button class="train-btn" onclick="selectTrain(\''+t.code+'\',\''+t.from+'\',\''+t.to+'\')">选择</button></div></div>';
+}).join('');
+}
+
+function selectTrain(code,from,to){
+document.getElementById('grab-train').value=code;
+document.getElementById('grab-from').value=from;
+document.getElementById('grab-to').value=to;
+document.querySelector('.nav-item:nth-child(3)').click();
+}
+
+function appLogin(){
+try{bridge.open12306App();}catch(e){showStatus('login-status','error','跳转失败: '+e.message)}
+}
+
+function startGrab(){
+showStatus('grab-status','loading','抢票启动中...');
+try{
+var r=JSON.parse(bridge.startGrab(
+document.getElementById('grab-train').value,
+document.getElementById('grab-from').value,
+document.getElementById('grab-to').value,
+document.getElementById('grab-date').value,
+document.getElementById('grab-seat').value
+));
+showStatus('grab-status',r.success?'success':'error',r.message||'');
+if(r.success)setTimeout(pollGrabLog,500);
+}catch(e){showStatus('grab-status','error',e.message)}
+}
+
+function stopGrab(){
+try{bridge.stopGrab();}catch(e){}
+showStatus('grab-status','success','已停止');
+}
+
+function pollGrabLog(){
+try{
+var r=JSON.parse(bridge.getGrabStatus());
+if(r.logs&&r.logs.length){
+document.getElementById('grab-log').textContent=r.logs.join('\n');
+var box=document.getElementById('grab-log');
+box.scrollTop=box.scrollHeight;
+}
+if(r.running)setTimeout(pollGrabLog,1000);
+else if(r.success){
+showStatus('grab-status','success','🎉 抢票任务结束！');
+}
+}catch(e){setTimeout(pollGrabLog,3000)}
+}
+
+document.getElementById('date').valueAsDate=new Date();
+document.getElementById('grab-date').valueAsDate=new Date();
+</script>
+</body>
+</html>
