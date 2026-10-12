@@ -162,7 +162,6 @@ public class MainActivity extends AppCompatActivity {
         } else {
             startService(serviceIntent);
         }
-        isServiceRunning = true;
         Toast.makeText(this, "启动本地服务...", Toast.LENGTH_SHORT).show();
     }
 
